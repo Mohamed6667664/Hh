@@ -1,0 +1,145 @@
+#!/bin/bash
+
+# التحديثات الأساسية وتثبيت التبعيات
+sudo su
+sudo apt update -y && sudo apt upgrade -y
+sudo apt install -y docker.io docker-compose git curl wget ufw
+
+# إنشاء مجلد العمل
+mkdir -p ~/dockercom
+cd ~/dockercom
+
+# إنشاء ملف Docker Compose
+cat <<EOL > windowsto2.yaml
+version: '3.8'
+services:
+  windows:
+    image: dockurr/windows
+    container_name: windows
+    restart: unless-stopped
+    environment:
+      VERSION: "10"  # تغيير الإصدار إلى Windows 10
+      USERNAME: "TOOLBOXLAP"
+      PASSWORD: "aDmin@123"
+      RAM_SIZE: "8G"  # زيادة الذاكرة لأداء أفضل
+      CPU_CORES: "4"
+      DISK_SIZE: "990G"
+      DISK2_SIZE: "101G"
+      SWAP_SIZE: "4G"  # إضافة ذاكرة مؤقتة
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN  # إضافة صلاحيات إدارية إضافية
+    ports:
+      - 8006:8006
+      - 3389:3389/tcp
+      - 3389:3389/udp
+    volumes:
+      - windows_storage:/storage  # تخزين مخصص
+      - ./logs:/var/log/windows  # تخزين السجلات
+    networks:
+      - windows_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # تحديد حجم ملف السجلات
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  windows_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24  # شبكة فرعية مخصصة
+
+volumes:
+  windows_storage:
+    driver: local
+EOL
+
+# فتح المنافذ في جدار الحماية
+sudo ufw allow 3389
+sudo ufw allow 8006
+sudo ufw enable
+
+# تشغيل الحاوية
+sudo docker-compose -f windowsto2.yaml up -d
+
+# إضافة نصوص برمجية لإدارة الحاوية
+cat <<EOL > manage_container.sh
+#!/bin/bash
+
+case "\$1" in
+  start)
+    sudo docker-compose -f ~/dockercom/windowsto2.yaml up -d
+    ;;
+  stop)
+    sudo docker-compose -f ~/dockercom/windowsto2.yaml down
+    ;;
+  restart)
+    sudo docker-compose -f ~/dockercom/windowsto2.yaml restart
+    ;;
+  logs)
+    sudo docker-compose -f ~/dockercom/windowsto2.yaml logs -f
+    ;;
+  backup)
+    sudo docker commit windows windows_backup
+    sudo docker save -o windows_backup.tar windows_backup
+    ;;
+  restore)
+    sudo docker load -i windows_backup.tar
+    ;;
+  *)
+    echo "Usage: \$0 {start|stop|restart|logs|backup|restore}"
+    exit 1
+    ;;
+esac
+EOL
+
+# جعل النص البرمجي قابلاً للتنفيذ
+chmod +x manage_container.sh
+
+# إضافة توثيق للكود
+cat <<EOL > README.md
+# Windows 10 RDP using Docker
+
+This repository contains a Docker Compose setup to run a Windows 10 RDP server.
+
+## Prerequisites
+
+- Docker
+- Docker Compose
+
+## Usage
+
+1. Clone the repository.
+2. Update the \`windowsto2.yaml\` file with your desired settings.
+3. Run \`docker-compose -f windowsto2.yaml up -d\`.
+4. Connect to the RDP server using the IP address and port 3389.
+
+## Management Script
+
+Use the \`manage_container.sh\` script to manage the container:
+
+- Start: \`./manage_container.sh start\`
+- Stop: \`./manage_container.sh stop\`
+- Restart: \`./manage_container.sh restart\`
+- View logs: \`./manage_container.sh logs\`
+- Backup: \`./manage_container.sh backup\`
+- Restore: \`./manage_container.sh restore\`
+
+## Security
+
+- Ensure to use a strong password.
+- Keep the system updated.
+EOL
+
+# إشعار الانتهاء
+echo "تم إنشاء Windows 10 RDP بنجاح! يمكنك الاتصال باستخدام IP الخادم ومنفذ 3389."
